@@ -104,7 +104,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
-  const [selectionReason, setSelectionReason] = useState('');
+  const [selectionReasons, setSelectionReasons] = useState<Record<string, string>>({});
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -187,7 +187,10 @@ export default function App() {
 
   const toggleSelected = (recordId: string) => setSelectedIds((current) => {
     const next = new Set(current);
-    if (next.has(recordId)) next.delete(recordId); else next.add(recordId);
+    if (next.has(recordId)) {
+      next.delete(recordId);
+      setSelectionReasons((reasons) => { const updated = { ...reasons }; delete updated[recordId]; return updated; });
+    } else next.add(recordId);
     return next;
   });
 
@@ -225,7 +228,7 @@ export default function App() {
         const newRecordId = await shortlist.addRecord();
         const linkValue: IOpenLink = { text: source.name, type: 'text', recordIds: [recordId], tableId: table.id, record_ids: [recordId], table_id: table.id };
         const values: Array<[typeof outputNames[number], string | number | IOpenLink | null]> = [
-          ['筛选结果', source.name], ['达人', linkValue], ['选择理由', selectionReason.trim()],
+          ['筛选结果', source.name], ['达人', linkValue], ['选择理由', selectionReasons[recordId]?.trim() ?? ''],
           ['报价', source.quote], ['CPM', source.cpm], ['合作类型', source.collaborationType],
           ['视频链接', source.videoLink], ['账号链接', source.accountLink], ['推荐标签', source.recommendationTag],
           ['推荐理由', source.recommendationReason], ['粉丝数', source.followers], ['近30天平均播放量', source.avgViews],
@@ -234,7 +237,7 @@ export default function App() {
       }));
       setSaveMessage(`已创建“${tableName}”，包含 ${selectedIds.size} 位达人及生成时的报价等资料。`);
       setSelectedIds(new Set());
-      setSelectionReason('');
+      setSelectionReasons({});
     } catch (cause) {
       setSaveMessage(cause instanceof Error ? `建表失败：${cause.message}` : '建表失败，请确认当前用户有编辑权限。');
     } finally {
@@ -251,7 +254,23 @@ export default function App() {
       </section>
       {error && <div className="status error">{error}</div>}
       {recognized.length > 0 && <section className="interpretation"><div className="section-heading"><h2>已识别条件</h2><span>{parsed.logic === 'and' ? '全部满足' : '满足任一'}</span></div><div className="chips">{recognized.map((item) => <span key={item}>{item}</span>)}</div>{parsed.head && <p className="hint">“头部”当前明确定义为粉丝数不少于 100 万。</p>}{parsed.rokSuitable && <p className="hint">ROK 综合内容类型、推荐标签和推荐理由评分；强垂类与“谨慎”会降分，理由明确提及 ROK、SLG、策略或手游会加分。</p>}</section>}
-      {hasSearched && !loading && !error && <section className="results"><div className="section-heading"><h2>筛选结果</h2><span>{results.length} / {records.length}</span></div>{results.length > 0 && <><div className="selection-bar"><button onClick={() => setSelectedIds(selectedIds.size === results.length ? new Set() : new Set(results.map((record) => record.id)))}>{selectedIds.size === results.length ? '清空选择' : '全选结果'}</button><button className="save-button" disabled={!selectedIds.size || saving} onClick={() => void createSelectionTable()}>{saving ? '建表中…' : `生成新表（${selectedIds.size}）`}</button></div>{selectedIds.size > 0 && <textarea className="selection-reason" value={selectionReason} onChange={(event) => setSelectionReason(event.target.value)} placeholder="填写选择理由（可选），会写入新表" rows={2} />}</>}{saveMessage && <div className="save-message">{saveMessage}</div>}{results.length === 0 ? <div className="empty">没有同时满足条件的达人，可以减少一个条件再试。</div> : results.map((record) => { const rok = assessRok(record); return <article className={`result-card ${selectedIds.has(record.id) ? 'selected' : ''}`} key={record.id}><label className="select-control"><input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleSelected(record.id)} /><span>选择</span></label><button className="record-detail" onClick={() => void openRecord(record.id)}><div className="record-title"><strong>{record.name}</strong><span>{record.followers == null ? '粉丝数待补充' : `${record.followers.toLocaleString()} 粉丝`}</span></div><div className="record-meta">{record.region} · {record.language} · {record.contentType}</div><div className="record-meta">{record.collaborationType} · 合作过：{record.collaborated || '未知'} · {record.avgViews == null ? '播放量待补充' : `均播 ${record.avgViews.toLocaleString()}`}</div>{record.quote && <div className="record-reason">报价：{record.quote}</div>}{parsed.rokSuitable && <div className="record-reason">ROK {rok.score} 分 · {rok.reasons.join('、') || '暂无明确依据'}</div>}{record.recommendationReason && <div className="record-reason">推荐理由：{record.recommendationReason}</div>}</button></article>; })}</section>}
+      {hasSearched && !loading && !error && <section className="results">
+        <div className="section-heading"><h2>筛选结果</h2><span>{results.length} / {records.length}</span></div>
+        {results.length > 0 && <div className="selection-bar">
+          <button onClick={() => { const clear = selectedIds.size === results.length; setSelectedIds(clear ? new Set() : new Set(results.map((record) => record.id))); if (clear) setSelectionReasons({}); }}>{selectedIds.size === results.length ? '清空选择' : '全选结果'}</button>
+          <button className="save-button" disabled={!selectedIds.size || saving} onClick={() => void createSelectionTable()}>{saving ? '建表中…' : `生成新表（${selectedIds.size}）`}</button>
+        </div>}
+        {saveMessage && <div className="save-message">{saveMessage}</div>}
+        {results.length === 0 ? <div className="empty">没有同时满足条件的达人，可以减少一个条件再试。</div> : results.map((record) => {
+          const rok = assessRok(record);
+          const selected = selectedIds.has(record.id);
+          return <article className={`result-card ${selected ? 'selected' : ''}`} key={record.id}>
+            <label className="select-control"><input type="checkbox" checked={selected} onChange={() => toggleSelected(record.id)} /><span>选择</span></label>
+            <button className="record-detail" onClick={() => void openRecord(record.id)}><div className="record-title"><strong>{record.name}</strong><span>{record.followers == null ? '粉丝数待补充' : `${record.followers.toLocaleString()} 粉丝`}</span></div><div className="record-meta">{record.region} · {record.language} · {record.contentType}</div><div className="record-meta">{record.collaborationType} · 合作过：{record.collaborated || '未知'} · {record.avgViews == null ? '播放量待补充' : `均播 ${record.avgViews.toLocaleString()}`}</div>{record.quote && <div className="record-reason">报价：{record.quote}</div>}{parsed.rokSuitable && <div className="record-reason">ROK {rok.score} 分 · {rok.reasons.join('、') || '暂无明确依据'}</div>}{record.recommendationReason && <div className="record-reason">推荐理由：{record.recommendationReason}</div>}</button>
+            {selected && <textarea className="selection-reason per-record" value={selectionReasons[record.id] ?? ''} onChange={(event) => setSelectionReasons((reasons) => ({ ...reasons, [record.id]: event.target.value }))} placeholder={`填写选择 ${record.name} 的理由（可选）`} rows={2} />}
+          </article>;
+        })}
+      </section>}
     </main>
   );
 }
