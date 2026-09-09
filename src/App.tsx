@@ -3,14 +3,17 @@ import { bitable, IFieldMeta, ITable } from '@lark-base-open/js-sdk';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Logic = 'and' | 'or';
-type KolRecord = { id: string; name: string; collaborated: string; language: string; contentType: string; collaborationType: string; region: string; followers: number | null; avgViews: number | null; searchable: string; };
+type KolRecord = { id: string; name: string; collaborated: string; language: string; contentType: string; collaborationType: string; region: string; recommendationTag: string; recommendationReason: string; followers: number | null; avgViews: number | null; searchable: string; };
 type ParsedQuery = { logic: Logic; head: boolean; collaborated: boolean; english: boolean; western: boolean; varietyGaming: boolean; dedicated: boolean; integration: boolean; rokSuitable: boolean; minFollowers: number | null; minViews: number | null; freeTerms: string[]; };
 
-const FIELD_NAMES = ['达人姓名', '是否合作过', '语言', '内容类型', '合作类型', '粉丝数', '近30天平均播放量', '所属地区'] as const;
+const FIELD_NAMES = ['达人姓名', '是否合作过', '语言', '内容类型', '合作类型', '粉丝数', '近30天平均播放量', '所属地区', '推荐标签', '推荐理由'] as const;
 const HEAD_FOLLOWERS = 1_000_000;
 const WESTERN_REGIONS = ['美国', '英国', '加拿大', '澳大利亚', '新西兰', '爱尔兰', '法国', '西班牙', '瑞典', '荷兰', '比利时', '智利', '阿根廷', '地区待确认（英语）'];
 const ROK_CONTENT_TYPES = ['泛游戏/游戏娱乐', '游戏攻略/评测'];
 const ROK_EXCLUDED_TYPES = ['Minecraft/Roblox', '宝可梦/任天堂'];
+const ROK_EXACT_KEYWORDS = ['rise of kingdoms', 'riseofkingdoms', '万国觉醒', 'rok'];
+const ROK_POSITIVE_KEYWORDS = ['slg', '4x', '策略游戏', '战争策略', '战争游戏', '帝国', '文明', '历史游戏', '手游', '手机游戏', 'mobile game', 'strategy game'];
+const ROK_NEGATIVE_KEYWORDS = ['minecraft', 'roblox', '宝可梦', 'pokemon', '任天堂', 'nintendo', '少儿', '儿童向'];
 const EXAMPLES = [
   '头部网红，合作过的，能和 Rise of Kingdom 做推广',
   '粉丝数超过 1m 的欧美英语游戏博主',
@@ -81,6 +84,22 @@ const fuzzyContains = (value: string, term: string) => {
   return tolerance > 0 && haystack.split(' ').some((token) => editDistance(token, needle) <= tolerance);
 };
 
+const assessRok = (record: KolRecord) => {
+  let score = 0;
+  const reasons: string[] = [];
+  const reasonText = normalize(record.recommendationReason);
+  const exactMatch = includesAny(reasonText, ROK_EXACT_KEYWORDS);
+  if (includesAny(record.contentType, ROK_CONTENT_TYPES)) { score += 2; reasons.push('内容类型匹配'); }
+  if (includesAny(record.contentType, ROK_EXCLUDED_TYPES)) { score -= 3; reasons.push('强垂类受众'); }
+  if (/优先推荐/.test(record.recommendationTag)) { score += 2; reasons.push('优先推荐'); }
+  else if (/^推荐$/.test(record.recommendationTag.trim())) { score += 1; reasons.push('推荐'); }
+  else if (/谨慎/.test(record.recommendationTag)) { score -= 2; reasons.push('谨慎合作'); }
+  if (exactMatch) { score += 4; reasons.push('理由提及 ROK'); }
+  else if (includesAny(reasonText, ROK_POSITIVE_KEYWORDS)) { score += 2; reasons.push('理由含策略/手游信号'); }
+  if (includesAny(reasonText, ROK_NEGATIVE_KEYWORDS)) { score -= 3; reasons.push('理由含不匹配信号'); }
+  return { score, suitable: score >= 2, reasons };
+};
+
 export default function App() {
   const [query, setQuery] = useState(EXAMPLES[0]);
   const [records, setRecords] = useState<KolRecord[]>([]);
@@ -115,7 +134,8 @@ export default function App() {
         return {
           id, name: cells['达人姓名'] || '未命名达人', collaborated: cells['是否合作过'],
           language: cells['语言'], contentType: cells['内容类型'], collaborationType: cells['合作类型'],
-          region: cells['所属地区'], followers: parseNumber(cells['粉丝数']), avgViews: parseNumber(cells['近30天平均播放量']),
+          region: cells['所属地区'], recommendationTag: cells['推荐标签'], recommendationReason: cells['推荐理由'],
+          followers: parseNumber(cells['粉丝数']), avgViews: parseNumber(cells['近30天平均播放量']),
           searchable: normalize(values.join(' ')),
         };
       }));
@@ -144,13 +164,13 @@ export default function App() {
       if (parsed.varietyGaming) conditions.push(normalize(record.contentType).includes('泛游戏'));
       if (parsed.dedicated) conditions.push(/dedicated|整片|专属/i.test(record.collaborationType));
       if (parsed.integration) conditions.push(/integrated|integration|贴片|植入/i.test(record.collaborationType));
-      if (parsed.rokSuitable) conditions.push(
-        includesAny(record.contentType, ROK_CONTENT_TYPES) && !includesAny(record.contentType, ROK_EXCLUDED_TYPES),
-      );
+      if (parsed.rokSuitable) conditions.push(assessRok(record).suitable);
       parsed.freeTerms.forEach((term) => conditions.push(fuzzyContains(record.searchable, term)));
       if (!conditions.length) return fuzzyContains(record.searchable, query);
       return parsed.logic === 'or' ? conditions.some(Boolean) : conditions.every(Boolean);
-    }).sort((a, b) => (b.avgViews ?? -1) - (a.avgViews ?? -1));
+    }).sort((a, b) => parsed.rokSuitable
+      ? assessRok(b).score - assessRok(a).score || (b.avgViews ?? -1) - (a.avgViews ?? -1)
+      : (b.avgViews ?? -1) - (a.avgViews ?? -1));
   }, [hasSearched, records, parsed, query]);
 
   const recognized = [
@@ -159,7 +179,7 @@ export default function App() {
     parsed.minViews != null && `播放量 ≥ ${parsed.minViews.toLocaleString()}`,
     parsed.collaborated && '合作过', parsed.english && '英语', parsed.western && '欧美地区',
     parsed.varietyGaming && '泛游戏/游戏娱乐', parsed.dedicated && '整片 Dedicated', parsed.integration && '贴片 Integration',
-    parsed.rokSuitable && 'ROK 适配：泛游戏或游戏攻略/评测', ...parsed.freeTerms.map((term) => `包含“${term}”`),
+    parsed.rokSuitable && 'ROK 综合适配评分 ≥ 2', ...parsed.freeTerms.map((term) => `包含“${term}”`),
   ].filter(Boolean) as string[];
 
   const openRecord = async (recordId: string) => {
@@ -176,8 +196,8 @@ export default function App() {
       </section>
       <section className="examples"><span>试试这些：</span>{EXAMPLES.map((example) => <button key={example} onClick={() => { setQuery(example); setHasSearched(false); }}>{example}</button>)}</section>
       {error && <div className="status error">{error}</div>}
-      {recognized.length > 0 && <section className="interpretation"><div className="section-heading"><h2>已识别条件</h2><span>{parsed.logic === 'and' ? '全部满足' : '满足任一'}</span></div><div className="chips">{recognized.map((item) => <span key={item}>{item}</span>)}</div>{parsed.head && <p className="hint">“头部”当前明确定义为粉丝数不少于 100 万。</p>}{parsed.rokSuitable && <p className="hint">ROK 目前只匹配“泛游戏/游戏娱乐”和“游戏攻略/评测”，排除 Minecraft/Roblox、宝可梦/任天堂等强垂类；这是内容适配推断，不代表曾推广过该游戏。</p>}</section>}
-      {hasSearched && !loading && !error && <section className="results"><div className="section-heading"><h2>筛选结果</h2><span>{results.length} / {records.length}</span></div>{results.length === 0 ? <div className="empty">没有同时满足条件的达人，可以减少一个条件再试。</div> : results.map((record) => <button className="result-card" key={record.id} onClick={() => void openRecord(record.id)}><div className="record-title"><strong>{record.name}</strong><span>{record.followers == null ? '粉丝数待补充' : `${record.followers.toLocaleString()} 粉丝`}</span></div><div className="record-meta">{record.region} · {record.language} · {record.contentType}</div><div className="record-meta">{record.collaborationType} · 合作过：{record.collaborated || '未知'} · {record.avgViews == null ? '播放量待补充' : `均播 ${record.avgViews.toLocaleString()}`}</div></button>)}</section>}
+      {recognized.length > 0 && <section className="interpretation"><div className="section-heading"><h2>已识别条件</h2><span>{parsed.logic === 'and' ? '全部满足' : '满足任一'}</span></div><div className="chips">{recognized.map((item) => <span key={item}>{item}</span>)}</div>{parsed.head && <p className="hint">“头部”当前明确定义为粉丝数不少于 100 万。</p>}{parsed.rokSuitable && <p className="hint">ROK 综合内容类型、推荐标签和推荐理由评分；强垂类与“谨慎”会降分，理由明确提及 ROK、SLG、策略或手游会加分。</p>}</section>}
+      {hasSearched && !loading && !error && <section className="results"><div className="section-heading"><h2>筛选结果</h2><span>{results.length} / {records.length}</span></div>{results.length === 0 ? <div className="empty">没有同时满足条件的达人，可以减少一个条件再试。</div> : results.map((record) => { const rok = assessRok(record); return <button className="result-card" key={record.id} onClick={() => void openRecord(record.id)}><div className="record-title"><strong>{record.name}</strong><span>{record.followers == null ? '粉丝数待补充' : `${record.followers.toLocaleString()} 粉丝`}</span></div><div className="record-meta">{record.region} · {record.language} · {record.contentType}</div><div className="record-meta">{record.collaborationType} · 合作过：{record.collaborated || '未知'} · {record.avgViews == null ? '播放量待补充' : `均播 ${record.avgViews.toLocaleString()}`}</div>{parsed.rokSuitable && <div className="record-reason">ROK {rok.score} 分 · {rok.reasons.join('、') || '暂无明确依据'}</div>}{record.recommendationReason && <div className="record-reason">推荐理由：{record.recommendationReason}</div>}</button>; })}</section>}
     </main>
   );
 }

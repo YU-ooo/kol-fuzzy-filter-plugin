@@ -30,6 +30,7 @@ textarea::placeholder { color: #a2a9b5; }
 .record-title strong { font-size: 14px; }
 .record-title span { flex: 0 0 auto; color: #5967d9; font-size: 11px; font-weight: 700; }
 .record-meta { overflow: hidden; margin-top: 6px; color: #697386; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.record-reason { margin-top: 7px; padding-top: 7px; border-top: 1px dashed #e4e7ee; color: #596173; font-size: 11px; line-height: 1.45; }
 .status, .empty { padding: 16px; border-radius: 12px; background: #fff; color: #7a8391; text-align: center; font-size: 12px; }
 .status.error { border: 1px solid #f2c7cc; background: #fff4f5; color: #b04451; }
 @media (max-width: 340px) { .app-shell { padding: 16px 12px 32px; } .record-title { align-items: flex-start; flex-direction: column; } }
