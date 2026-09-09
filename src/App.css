@@ -29,6 +29,7 @@ textarea::placeholder { color: #a2a9b5; }
 .selection-bar button { padding: 8px 10px; border: 1px solid #dfe3ea; border-radius: 9px; background: #fff; color: #53606f; cursor: pointer; font-size: 11px; }
 .selection-bar .save-button { flex: 1; border-color: #5f6ee2; background: #5f6ee2; color: #fff; font-weight: 700; }
 .selection-bar button:disabled { opacity: .5; cursor: default; }
+.selection-reason { min-height: 58px; margin: 0 0 10px; padding: 9px 10px; border: 1px solid #dfe3ea; border-radius: 9px; background: #fff; font-size: 11px; resize: vertical; }
 .save-message { margin-bottom: 10px; padding: 9px 10px; border-radius: 9px; background: #edf8f2; color: #34725a; font-size: 11px; line-height: 1.45; }
 .record-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .record-title strong { font-size: 14px; }
